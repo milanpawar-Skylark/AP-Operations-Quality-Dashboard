@@ -188,6 +188,52 @@ const li=(r,val,c)=>`<li><span>${r.n}<small>${r.l}</small></span><b class="${c||
 
 function getRows(){return ROWS.filter(r=>(F.loc==="All Locations"||r.l===F.loc)&&(F.band==="All"||BN[band(r.cu)]===F.band.split(" (")[0])&&(F.trend==="All"||trend(r.d)===F.trend))}
 
+/* Weekly trend explorer: location and project drop-downs */
+let TS={loc:"All Locations",proj:"All Projects"};
+const PAL=["#2f6fb0","#c27d0e","#1e8e5a","#c53a30","#6b5aa8","#0e8a8a","#a0522d","#8a8f98","#d2691e","#4b6584"];
+const cc=v=>v==null?"var(--muted)":v>=TARGET?"var(--green)":v>=TARGET-.5?"var(--amber)":"var(--red)";
+function lines2(cats,series,W,H){
+  const L=48,R=40,T=22,B=30;let all=[TARGET];series.forEach(s=>s.v.forEach(v=>{if(v!=null)all.push(v)}));
+  let lo=Math.min(...all),hi=Math.max(...all);const pd=(hi-lo)*.15||.2;lo-=pd;hi+=pd;
+  const x=i=>L+i*(W-L-R)/(cats.length-1),y=v=>T+(hi-v)/(hi-lo)*(H-T-B);let s="";
+  for(let g=0;g<=4;g++){const gv=lo+(hi-lo)*g/4;s+=`<line x1="${L}" x2="${W-R}" y1="${y(gv)}" y2="${y(gv)}" stroke="var(--line)"/><text x="${L-6}" y="${y(gv)+4}" text-anchor="end" font-size="11" fill="var(--muted)">${gv.toFixed(1)}</text>`}
+  cats.forEach((c,i)=>s+=`<text x="${x(i)}" y="${H-8}" text-anchor="middle" font-size="12" fill="var(--muted)">${c}</text>`);
+  s+=`<line x1="${L}" x2="${W-R}" y1="${y(TARGET)}" y2="${y(TARGET)}" stroke="var(--ink)" stroke-dasharray="5 4"/><text x="${W-R}" y="${y(TARGET)-5}" text-anchor="end" font-size="11" fill="var(--muted)">Target ${TARGET}%</text>`;
+  series.forEach(se=>{let seg=[];const flush=()=>{if(seg.length>1)s+=`<polyline fill="none" stroke="${se.c}" stroke-width="${se.w||2}" stroke-linejoin="round" points="${seg.map(p=>p.join(",")).join(" ")}"/>`;seg=[]};
+    se.v.forEach((v,i)=>{if(v==null){flush();return}seg.push([x(i),y(v)]);});flush();
+    se.v.forEach((v,i)=>{if(v!=null)s+=`<circle cx="${x(i)}" cy="${y(v)}" r="${(se.w||2)>3?4.5:3.5}" fill="${se.c}"><title>${se.name}, ${cats[i]}: ${v.toFixed(2)}%</title></circle>`})});
+  cats.forEach((c,i)=>{const a=[];series.forEach(se=>{if(se.lab&&se.v[i]!=null)a.push({y:y(se.v[i]),v:se.v[i],c:se.c})});a.sort((p,q)=>p.y-q.y);
+    for(let k=1;k<a.length;k++)if(a[k].y-a[k-1].y<13)a[k].y=a[k-1].y+13;
+    a.forEach(t=>s+=`<text x="${x(i)+(i===cats.length-1?-9:9)}" y="${t.y+4}" text-anchor="${i===cats.length-1?"end":"start"}" font-size="11" font-weight="600" fill="${t.c}">${t.v.toFixed(2)}</text>`)});
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Weekly quality trend">${s}</svg>`}
+function projOpts(){const n=Object.values(S).filter(s=>TS.loc==="All Locations"||s.l===TS.loc).map(s=>s.n).sort();
+  return ["All Projects",...n].map(o=>`<option${o===TS.proj?" selected":""}>${o}</option>`).join("")}
+function trendOut(){
+  const ix=[0,1,2,3],SPv=Object.values(S),X=SPv.filter(s=>TS.loc==="All Locations"||s.l===TS.loc);
+  const wl=(name,c,set,w)=>({name,c,w,lab:1,n:set.length,v:ix.map(i=>{const r=wq(set,[i]);return r?r.q:null})});
+  const chg=a=>{const v=a.filter(x=>x!=null);return v.length>1?v[v.length-1]-v[0]:null};
+  const cell=v=>`<td class="n" style="color:${cc(v)};font-weight:600">${v==null?"–":v.toFixed(2)+"%"}</td>`;
+  const chgCell=a=>{const d=chg(a);return `<td class="n ${tcl(d)}">${d==null?"–":sg(d," pts")}</td>`};
+  let series,head,rows,title;
+  if(TS.proj!=="All Projects"){
+    const s=S[TS.proj];title=s.n+" ("+s.l+")";series=[{name:s.n,c:"var(--navy)",w:3,lab:1,v:ix.map(i=>s.q[i]??null)}];
+    head=["Week","Location","Quality","Documents","Errors","Errors per 100 docs","Change vs prior week"];
+    rows=ix.filter(i=>s.d[i]!=null).map((i,k,a)=>{const p=a[k-1];return `<tr><td>${WK[i]}</td><td>${s.l}</td>${cell(s.q[i])}<td class="n">${s.d[i].toLocaleString()}</td><td class="n">${s.e[i].toLocaleString()}</td><td class="n">${(100*s.e[i]/s.d[i]).toFixed(1)}</td><td class="n ${p==null?"":tcl(s.q[i]-s.q[p])}">${p==null?"–":sg(s.q[i]-s.q[p]," pts")}</td></tr>`});
+  }else if(TS.loc==="All Locations"){
+    title="All locations, volume-weighted";series=[wl("All locations","var(--navy)",SPv,3.5),...LOCS.map(l=>wl(l,LC[l],SPv.filter(s=>s.l===l),2.2))];
+    head=["Location","Projects",...WK,"Change"];
+    rows=series.map((se,k)=>`<tr><td>${k?se.name:"<b>"+se.name+"</b>"}</td><td class="n">${se.n}</td>${se.v.map(cell).join("")}${chgCell(se.v)}</tr>`);
+  }else{
+    title=TS.loc+": weighted average and every project";
+    series=[wl(TS.loc+" (weighted)","var(--navy)",X,3.5),...X.map((s,k)=>({name:s.n,c:PAL[k%PAL.length],w:1.8,lab:0,v:ix.map(i=>s.q[i]??null)}))];
+    head=["Project","Location",...WK,"Change"];
+    rows=series.map((se,k)=>`<tr><td>${k?se.name:"<b>"+se.name+"</b>"}</td><td>${k?TS.loc:""}</td>${se.v.map(cell).join("")}${chgCell(se.v)}</tr>`);
+  }
+  return `<h3>${title}</h3><p class="hint">Quality % by week. A gap means no production that week. The dashed line is the ${TARGET}% target and the axis does not start at zero.</p>${lines2(WK,series,640,300)}${leg(series.map(se=>[se.name,se.c]))}<div style="margin-top:16px">${tbl(head,rows)}</div>`}
+function tChange(k,v){if(k==="loc"){TS.loc=v;TS.proj="All Projects"}else TS.proj=v;
+  document.getElementById("tProj").innerHTML=projOpts();document.getElementById("tOut").innerHTML=trendOut()}
+function trendSec(){return `<h2 class="sec">📈 Weekly Trend: Location and Project</h2><div class="panel"><div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:16px"><label>Location<select id="tLoc" onchange="tChange('loc',this.value)">${["All Locations",...LOCS].map(o=>`<option${o===TS.loc?" selected":""}>${o}</option>`).join("")}</select></label><label>Project<select id="tProj" onchange="tChange('proj',this.value)">${projOpts()}</select></label></div><div id="tOut">${trendOut()}</div></div>`}
+
 function render(){
   const R=getRows(),n=R.length;
   document.getElementById("fInfo").textContent=`Showing ${n} of ${ROWS.length} projects`;
@@ -236,6 +282,7 @@ function render(){
    <div class="panel"><h3>Location Quality vs 99% Target</h3><p class="hint">Average ${CW} quality. The dashed line is the target and the axis does not start at zero.</p>${bars(ls,[{name:CW,color:"var(--navy)",vals:ls.map(l=>avg(R.filter(r=>r.l===l).map(r=>r.cu)))}],560,280,false,{label:"Location quality vs target"})}</div></div>`;
 
   const SER=s=>[{name:PW,color:"var(--pale)",vals:s.map(r=>r.pr)},{name:CW,color:"var(--navy)",vals:s.map(r=>r.cu)}];
+  h+=trendSec();
   h+=`<h2 class="sec">📍 Location Graphs: Detailed View</h2>`+ls.map(l=>{const s=R.filter(r=>r.l===l);
     return `<div class="panel" style="margin-bottom:14px"><h3 style="display:flex;justify-content:space-between"><span>${l}</span><span>${f2(avg(s.map(r=>r.cu)))}</span></h3><p class="hint">${s.length} projects, ${PW} vs ${CW}</p><div class="scroll"><div style="min-width:${Math.max(520,s.length*60)}px">${bars(s.map(r=>r.n),SER(s),700,310,true,{label:l+" projects"})}</div></div>${leg([[PW,"var(--pale)"],[CW,"var(--navy)"]])}</div>`}).join("");
 
